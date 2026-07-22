@@ -1,0 +1,739 @@
+-- LocalScript
+-- Local: StarterPlayer > StarterPlayerScripts > PainelSeguroCustom
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+------------------------------------------------------------
+-- ESTADOS INTERNOS
+------------------------------------------------------------
+
+local selectedPlayerName = nil
+local functionActive = false
+local dropdownOpen = false
+local guiOpen = false
+local spinActive = false
+local notifOrder = 0
+
+------------------------------------------------------------
+-- FUNÇÕES ÚTEIS
+------------------------------------------------------------
+
+local function getPlayerNames()
+	local names = {}
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		table.insert(names, player.Name)
+	end
+
+	table.sort(names)
+
+	return names
+end
+
+------------------------------------------------------------
+-- GUI PRINCIPAL
+------------------------------------------------------------
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "SafeCustomPanel"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 999000
+gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+------------------------------------------------------------
+-- NOTIFICAÇÕES
+------------------------------------------------------------
+
+local notifHolder = Instance.new("Frame")
+notifHolder.Name = "Notifications"
+notifHolder.Size = UDim2.new(0.92, 0, 0, 0)
+notifHolder.Position = UDim2.new(0.5, 0, 0, 18)
+notifHolder.AnchorPoint = Vector2.new(0.5, 0)
+notifHolder.BackgroundTransparency = 1
+notifHolder.BorderSizePixel = 0
+notifHolder.AutomaticSize = Enum.AutomaticSize.Y
+notifHolder.Parent = gui
+
+local notifSizeConstraint = Instance.new("UISizeConstraint")
+notifSizeConstraint.MaxSize = Vector2.new(340, 10000)
+notifSizeConstraint.Parent = notifHolder
+
+local notifList = Instance.new("UIListLayout")
+notifList.Padding = UDim.new(0, 8)
+notifList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+notifList.SortOrder = Enum.SortOrder.LayoutOrder
+notifList.Parent = notifHolder
+
+local function notify(title, description)
+	notifOrder += 1
+
+	local notif = Instance.new("Frame")
+	notif.Name = "Notification"
+	notif.Size = UDim2.new(1, 0, 0, 56)
+	notif.BackgroundColor3 = Color3.fromRGB(24, 27, 38)
+	notif.BorderSizePixel = 0
+	notif.BackgroundTransparency = 1
+	notif.ClipsDescendants = true
+	notif.LayoutOrder = notifOrder
+	notif.Parent = notifHolder
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 12)
+	corner.Parent = notif
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 1
+	stroke.Color = Color3.fromRGB(85, 95, 135)
+	stroke.Transparency = 1
+	stroke.Parent = notif
+
+	local text = Instance.new("TextLabel")
+	text.Size = UDim2.new(1, -20, 1, -10)
+	text.Position = UDim2.new(0, 10, 0, 5)
+	text.BackgroundTransparency = 1
+	text.Text = description == "" and title or (title .. "\n" .. description)
+	text.TextColor3 = Color3.fromRGB(240, 242, 250)
+	text.TextXAlignment = Enum.TextXAlignment.Left
+	text.TextYAlignment = Enum.TextYAlignment.Center
+	text.Font = Enum.Font.Gotham
+	text.TextSize = 14
+	text.TextWrapped = true
+	text.TextTransparency = 1
+	text.Parent = notif
+
+	TweenService:Create(notif, TweenInfo.new(0.18), {BackgroundTransparency = 0.08}):Play()
+	TweenService:Create(stroke, TweenInfo.new(0.18), {Transparency = 0.2}):Play()
+	TweenService:Create(text, TweenInfo.new(0.18), {TextTransparency = 0}):Play()
+
+	task.delay(3, function()
+		TweenService:Create(notif, TweenInfo.new(0.35), {BackgroundTransparency = 1}):Play()
+		TweenService:Create(stroke, TweenInfo.new(0.35), {Transparency = 1}):Play()
+		TweenService:Create(text, TweenInfo.new(0.35), {TextTransparency = 1}):Play()
+
+		task.delay(0.4, function()
+			notif:Destroy()
+		end)
+	end)
+end
+
+------------------------------------------------------------
+-- EFEITO HOVER
+------------------------------------------------------------
+
+local function addHover(button, normalColor, hoverColor)
+	button.MouseEnter:Connect(function()
+		TweenService:Create(button, TweenInfo.new(0.12), {BackgroundColor3 = hoverColor}):Play()
+	end)
+
+	button.MouseLeave:Connect(function()
+		TweenService:Create(button, TweenInfo.new(0.12), {BackgroundColor3 = normalColor}):Play()
+	end)
+end
+
+------------------------------------------------------------
+-- BOTÃO MOBILE PARA ABRIR/FECHAR
+------------------------------------------------------------
+
+local openButton = Instance.new("TextButton")
+openButton.Name = "OpenCloseButton"
+openButton.Size = UDim2.fromOffset(56, 56)
+openButton.Position = UDim2.new(1, -76, 1, -96)
+openButton.BackgroundColor3 = Color3.fromRGB(24, 27, 38)
+openButton.Text = "☰"
+openButton.TextColor3 = Color3.fromRGB(240, 242, 250)
+openButton.TextScaled = true
+openButton.Font = Enum.Font.GothamBold
+openButton.BorderSizePixel = 0
+openButton.AutoButtonColor = false
+openButton.Parent = gui
+
+local openCorner = Instance.new("UICorner")
+openCorner.CornerRadius = UDim.new(0, 14)
+openCorner.Parent = openButton
+
+local openStroke = Instance.new("UIStroke")
+openStroke.Thickness = 1.5
+openStroke.Color = Color3.fromRGB(95, 105, 145)
+openStroke.Transparency = 0.1
+openStroke.Parent = openButton
+
+local openPadding = Instance.new("UIPadding")
+openPadding.PaddingTop = UDim.new(0, 6)
+openPadding.PaddingBottom = UDim.new(0, 6)
+openPadding.PaddingLeft = UDim.new(0, 6)
+openPadding.PaddingRight = UDim.new(0, 6)
+openPadding.Parent = openButton
+
+addHover(openButton, Color3.fromRGB(24, 27, 38), Color3.fromRGB(34, 38, 54))
+
+------------------------------------------------------------
+-- JANELA PRINCIPAL
+------------------------------------------------------------
+
+local main = Instance.new("Frame")
+main.Name = "MainFrame"
+main.Size = UDim2.new(0.92, 0, 0.78, 0)
+main.Position = UDim2.new(0.5, 0, 0.5, 0)
+main.AnchorPoint = Vector2.new(0.5, 0.5)
+main.BackgroundColor3 = Color3.fromRGB(16, 18, 26)
+main.BorderSizePixel = 0
+main.Visible = false
+main.Parent = gui
+
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 16)
+mainCorner.Parent = main
+
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Thickness = 1.5
+mainStroke.Color = Color3.fromRGB(75, 85, 120)
+mainStroke.Transparency = 0.15
+mainStroke.Parent = main
+
+local mainSize = Instance.new("UISizeConstraint")
+mainSize.MaxSize = Vector2.new(430, 560)
+mainSize.MinSize = Vector2.new(280, 360)
+mainSize.Parent = main
+
+------------------------------------------------------------
+-- BARRA DE TÍTULO
+------------------------------------------------------------
+
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 52)
+titleBar.BackgroundColor3 = Color3.fromRGB(24, 27, 38)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = main
+
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 16)
+titleCorner.Parent = titleBar
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, -90, 1, 0)
+titleLabel.Position = UDim2.new(0, 16, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "Painel Seguro"
+titleLabel.TextColor3 = Color3.fromRGB(245, 247, 255)
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextSize = 18
+titleLabel.Parent = titleBar
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Name = "CloseButton"
+closeBtn.Size = UDim2.fromOffset(34, 34)
+closeBtn.Position = UDim2.new(1, -44, 0.5, -17)
+closeBtn.BackgroundColor3 = Color3.fromRGB(35, 39, 55)
+closeBtn.Text = "X"
+closeBtn.TextColor3 = Color3.fromRGB(240, 242, 250)
+closeBtn.TextScaled = true
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.BorderSizePixel = 0
+closeBtn.AutoButtonColor = false
+closeBtn.Parent = titleBar
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 10)
+closeCorner.Parent = closeBtn
+
+addHover(closeBtn, Color3.fromRGB(35, 39, 55), Color3.fromRGB(55, 61, 84))
+
+------------------------------------------------------------
+-- CONTEÚDO
+------------------------------------------------------------
+
+local content = Instance.new("ScrollingFrame")
+content.Name = "Content"
+content.Size = UDim2.new(1, -32, 1, -84)
+content.Position = UDim2.new(0, 16, 0, 68)
+content.BackgroundTransparency = 1
+content.BorderSizePixel = 0
+content.ScrollBarThickness = 4
+content.ScrollBarImageColor3 = Color3.fromRGB(90, 100, 140)
+content.CanvasSize = UDim2.new(0, 0, 0, 0)
+content.AutomaticCanvasSize = Enum.AutomaticSize.Y
+content.ScrollingDirection = Enum.ScrollingDirection.Y
+content.Parent = main
+
+local contentList = Instance.new("UIListLayout")
+contentList.Padding = UDim.new(0, 12)
+contentList.SortOrder = Enum.SortOrder.LayoutOrder
+contentList.Parent = content
+
+local contentPadding = Instance.new("UIPadding")
+contentPadding.PaddingTop = UDim.new(0, 2)
+contentPadding.PaddingBottom = UDim.new(0, 8)
+contentPadding.Parent = content
+
+------------------------------------------------------------
+-- LABEL DE PLAYER SELECIONADO
+------------------------------------------------------------
+
+local selectedLabel = Instance.new("TextLabel")
+selectedLabel.Name = "SelectedLabel"
+selectedLabel.Size = UDim2.new(1, 0, 0, 26)
+selectedLabel.BackgroundTransparency = 1
+selectedLabel.Text = "Nenhum player selecionado"
+selectedLabel.TextColor3 = Color3.fromRGB(170, 180, 210)
+selectedLabel.TextXAlignment = Enum.TextXAlignment.Left
+selectedLabel.Font = Enum.Font.Gotham
+selectedLabel.TextSize = 15
+selectedLabel.TextWrapped = true
+selectedLabel.LayoutOrder = 1
+selectedLabel.Parent = content
+
+------------------------------------------------------------
+-- DROPDOWN BUTTON
+------------------------------------------------------------
+
+local dropdownButton = Instance.new("TextButton")
+dropdownButton.Name = "DropdownButton"
+dropdownButton.Size = UDim2.new(1, 0, 0, 46)
+dropdownButton.BackgroundColor3 = Color3.fromRGB(30, 34, 48)
+dropdownButton.Text = "Selecionar player"
+dropdownButton.TextColor3 = Color3.fromRGB(230, 235, 250)
+dropdownButton.Font = Enum.Font.GothamMedium
+dropdownButton.TextSize = 16
+dropdownButton.BorderSizePixel = 0
+dropdownButton.AutoButtonColor = false
+dropdownButton.TextTruncate = Enum.TextTruncate.AtEnd
+dropdownButton.LayoutOrder = 2
+dropdownButton.Parent = content
+
+local dropdownButtonCorner = Instance.new("UICorner")
+dropdownButtonCorner.CornerRadius = UDim.new(0, 12)
+dropdownButtonCorner.Parent = dropdownButton
+
+local dropdownButtonStroke = Instance.new("UIStroke")
+dropdownButtonStroke.Thickness = 1
+dropdownButtonStroke.Color = Color3.fromRGB(80, 90, 125)
+dropdownButtonStroke.Transparency = 0.2
+dropdownButtonStroke.Parent = dropdownButton
+
+addHover(dropdownButton, Color3.fromRGB(30, 34, 48), Color3.fromRGB(40, 45, 63))
+
+------------------------------------------------------------
+-- DROPDOWN LIST
+------------------------------------------------------------
+
+local dropdownFrame = Instance.new("Frame")
+dropdownFrame.Name = "DropdownFrame"
+dropdownFrame.Size = UDim2.new(1, 0, 0, 0)
+dropdownFrame.BackgroundColor3 = Color3.fromRGB(24, 27, 38)
+dropdownFrame.BorderSizePixel = 0
+dropdownFrame.Visible = false
+dropdownFrame.ClipsDescendants = true
+dropdownFrame.LayoutOrder = 3
+dropdownFrame.Parent = content
+
+local dropdownFrameCorner = Instance.new("UICorner")
+dropdownFrameCorner.CornerRadius = UDim.new(0, 12)
+dropdownFrameCorner.Parent = dropdownFrame
+
+local dropdownFrameStroke = Instance.new("UIStroke")
+dropdownFrameStroke.Thickness = 1
+dropdownFrameStroke.Color = Color3.fromRGB(80, 90, 125)
+dropdownFrameStroke.Transparency = 0.25
+dropdownFrameStroke.Parent = dropdownFrame
+
+local scroll = Instance.new("ScrollingFrame")
+scroll.Name = "DropdownScroll"
+scroll.Size = UDim2.new(1, 0, 1, 0)
+scroll.BackgroundTransparency = 1
+scroll.BorderSizePixel = 0
+scroll.ScrollBarThickness = 4
+scroll.ScrollBarImageColor3 = Color3.fromRGB(90, 100, 140)
+scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scroll.ScrollingDirection = Enum.ScrollingDirection.Y
+scroll.Parent = dropdownFrame
+
+local scrollList = Instance.new("UIListLayout")
+scrollList.Padding = UDim.new(0, 6)
+scrollList.SortOrder = Enum.SortOrder.LayoutOrder
+scrollList.Parent = scroll
+
+local scrollPadding = Instance.new("UIPadding")
+scrollPadding.PaddingTop = UDim.new(0, 6)
+scrollPadding.PaddingBottom = UDim.new(0, 6)
+scrollPadding.PaddingLeft = UDim.new(0, 6)
+scrollPadding.PaddingRight = UDim.new(0, 6)
+scrollPadding.Parent = scroll
+
+------------------------------------------------------------
+-- TOGGLE
+------------------------------------------------------------
+
+local toggleRow = Instance.new("Frame")
+toggleRow.Name = "ToggleRow"
+toggleRow.Size = UDim2.new(1, 0, 0, 46)
+toggleRow.BackgroundColor3 = Color3.fromRGB(30, 34, 48)
+toggleRow.BorderSizePixel = 0
+toggleRow.LayoutOrder = 4
+toggleRow.Parent = content
+
+local toggleRowCorner = Instance.new("UICorner")
+toggleRowCorner.CornerRadius = UDim.new(0, 12)
+toggleRowCorner.Parent = toggleRow
+
+local toggleRowStroke = Instance.new("UIStroke")
+toggleRowStroke.Thickness = 1
+toggleRowStroke.Color = Color3.fromRGB(80, 90, 125)
+toggleRowStroke.Transparency = 0.2
+toggleRowStroke.Parent = toggleRow
+
+local toggleTitle = Instance.new("TextLabel")
+toggleTitle.Size = UDim2.new(1, -95, 1, 0)
+toggleTitle.Position = UDim2.new(0, 14, 0, 0)
+toggleTitle.BackgroundTransparency = 1
+toggleTitle.Text = "Ativar função segura"
+toggleTitle.TextColor3 = Color3.fromRGB(230, 235, 250)
+toggleTitle.TextXAlignment = Enum.TextXAlignment.Left
+toggleTitle.Font = Enum.Font.GothamMedium
+toggleTitle.TextSize = 16
+toggleTitle.TextWrapped = true
+toggleTitle.Parent = toggleRow
+
+local toggleButton = Instance.new("TextButton")
+toggleButton.Name = "ToggleSwitch"
+toggleButton.Size = UDim2.fromOffset(64, 30)
+toggleButton.Position = UDim2.new(1, -78, 0.5, -15)
+toggleButton.BackgroundColor3 = Color3.fromRGB(55, 60, 80)
+toggleButton.Text = ""
+toggleButton.BorderSizePixel = 0
+toggleButton.AutoButtonColor = false
+toggleButton.Parent = toggleRow
+
+local toggleButtonCorner = Instance.new("UICorner")
+toggleButtonCorner.CornerRadius = UDim.new(1, 0)
+toggleButtonCorner.Parent = toggleButton
+
+local toggleStroke = Instance.new("UIStroke")
+toggleStroke.Thickness = 1
+toggleStroke.Color = Color3.fromRGB(95, 105, 140)
+toggleStroke.Transparency = 0.25
+toggleStroke.Parent = toggleButton
+
+local knob = Instance.new("Frame")
+knob.Name = "Knob"
+knob.Size = UDim2.fromOffset(24, 24)
+knob.Position = UDim2.new(0, 3, 0.5, -12)
+knob.BackgroundColor3 = Color3.fromRGB(240, 242, 250)
+knob.BorderSizePixel = 0
+knob.Parent = toggleButton
+
+local knobCorner = Instance.new("UICorner")
+knobCorner.CornerRadius = UDim.new(1, 0)
+knobCorner.Parent = knob
+
+------------------------------------------------------------
+-- BOTÃO DE DEMO SEGURA
+------------------------------------------------------------
+
+local demoButton = Instance.new("TextButton")
+demoButton.Name = "SafeDemoButton"
+demoButton.Size = UDim2.new(1, 0, 0, 44)
+demoButton.BackgroundColor3 = Color3.fromRGB(35, 39, 55)
+demoButton.Text = "Girar SafeSpinPart por 5s"
+demoButton.TextColor3 = Color3.fromRGB(230, 235, 250)
+demoButton.Font = Enum.Font.GothamMedium
+demoButton.TextSize = 16
+demoButton.BorderSizePixel = 0
+demoButton.AutoButtonColor = false
+demoButton.LayoutOrder = 5
+demoButton.Parent = content
+
+local demoCorner = Instance.new("UICorner")
+demoCorner.CornerRadius = UDim.new(0, 12)
+demoCorner.Parent = demoButton
+
+local demoStroke = Instance.new("UIStroke")
+demoStroke.Thickness = 1
+demoStroke.Color = Color3.fromRGB(85, 95, 130)
+demoStroke.Transparency = 0.25
+demoStroke.Parent = demoButton
+
+addHover(demoButton, Color3.fromRGB(35, 39, 55), Color3.fromRGB(48, 53, 73))
+
+------------------------------------------------------------
+-- RODAPÉ
+------------------------------------------------------------
+
+local footer = Instance.new("TextLabel")
+footer.Name = "Footer"
+footer.Size = UDim2.new(1, 0, 0, 34)
+footer.BackgroundTransparency = 1
+footer.Text = "Script seguro: não faz fling nem prejudica jogadores."
+footer.TextColor3 = Color3.fromRGB(130, 140, 170)
+footer.TextXAlignment = Enum.TextXAlignment.Left
+footer.Font = Enum.Font.Gotham
+footer.TextSize = 13
+footer.TextWrapped = true
+footer.LayoutOrder = 6
+footer.Parent = content
+
+------------------------------------------------------------
+-- FUNÇÕES DA INTERFACE
+------------------------------------------------------------
+
+local function updateSelectedLabel()
+	if selectedPlayerName then
+		selectedLabel.Text = "Selecionado: " .. selectedPlayerName
+	else
+		selectedLabel.Text = "Nenhum player selecionado"
+	end
+end
+
+local function updateToggleVisual()
+	if functionActive then
+		TweenService:Create(toggleButton, TweenInfo.new(0.18), {BackgroundColor3 = Color3.fromRGB(35, 190, 110)}):Play()
+		TweenService:Create(knob, TweenInfo.new(0.18), {Position = UDim2.new(1, -27, 0.5, -12)}):Play()
+	else
+		TweenService:Create(toggleButton, TweenInfo.new(0.18), {BackgroundColor3 = Color3.fromRGB(55, 60, 80)}):Play()
+		TweenService:Create(knob, TweenInfo.new(0.18), {Position = UDim2.new(0, 3, 0.5, -12)}):Play()
+	end
+end
+
+local function setFunctionActive(state)
+	if state and (not selectedPlayerName or not Players:FindFirstChild(selectedPlayerName)) then
+		notify("Bloqueado", "Escolha um player antes de ativar a função.")
+		functionActive = false
+		updateToggleVisual()
+		return
+	end
+
+	functionActive = state
+	updateToggleVisual()
+
+	if state then
+		notify("Função segura ativada", "Player selecionado: " .. tostring(selectedPlayerName))
+		print("[Painel Seguro] Função segura ativada. Player selecionado:", selectedPlayerName)
+	else
+		notify("Função segura desativada", "Nenhum efeito hostil foi aplicado.")
+	end
+end
+
+local function setDropdownOpen(state)
+	dropdownOpen = state
+
+	if state then
+		dropdownFrame.Visible = true
+
+		TweenService:Create(dropdownFrame, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Size = UDim2.new(1, 0, 0, 190),
+		}):Play()
+
+		dropdownButton.Text = "Fechar lista"
+	else
+		TweenService:Create(dropdownFrame, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+			Size = UDim2.new(1, 0, 0, 0),
+		}):Play()
+
+		dropdownButton.Text = selectedPlayerName or "Selecionar player"
+
+		task.delay(0.18, function()
+			if not dropdownOpen then
+				dropdownFrame.Visible = false
+			end
+		end)
+	end
+end
+
+local function clearDropdown()
+	for _, child in ipairs(scroll:GetChildren()) do
+		if child:IsA("TextButton") then
+			child:Destroy()
+		end
+	end
+end
+
+local function refreshDropdown()
+	local names = getPlayerNames()
+	clearDropdown()
+
+	for index, name in ipairs(names) do
+		local option = Instance.new("TextButton")
+		option.Name = name
+		option.Size = UDim2.new(1, 0, 0, 34)
+		option.BackgroundColor3 = Color3.fromRGB(32, 36, 52)
+		option.Text = name
+		option.TextColor3 = Color3.fromRGB(230, 235, 250)
+		option.Font = Enum.Font.Gotham
+		option.TextSize = 15
+		option.BorderSizePixel = 0
+		option.AutoButtonColor = false
+		option.TextTruncate = Enum.TextTruncate.AtEnd
+		option.LayoutOrder = index
+		option.Parent = scroll
+
+		local optionCorner = Instance.new("UICorner")
+		optionCorner.CornerRadius = UDim.new(0, 8)
+		optionCorner.Parent = option
+
+		addHover(option, Color3.fromRGB(32, 36, 52), Color3.fromRGB(45, 50, 70))
+
+		option.MouseButton1Click:Connect(function()
+			selectedPlayerName = name
+			updateSelectedLabel()
+			setDropdownOpen(false)
+			notify("Player selecionado", name)
+		end)
+	end
+
+	if selectedPlayerName and not table.find(names, selectedPlayerName) then
+		selectedPlayerName = nil
+		updateSelectedLabel()
+
+		if functionActive then
+			functionActive = false
+			updateToggleVisual()
+			notify("Função desativada", "O player selecionado saiu do servidor.")
+		end
+	end
+
+	if not dropdownOpen then
+		dropdownButton.Text = selectedPlayerName or "Selecionar player"
+	else
+		dropdownButton.Text = "Fechar lista"
+	end
+end
+
+local function setGuiOpen(state)
+	guiOpen = state
+
+	if state then
+		main.Visible = true
+		main.Position = UDim2.new(0.5, 0, 0.54, 0)
+
+		TweenService:Create(main, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Position = UDim2.new(0.5, 0, 0.5, 0),
+		}):Play()
+
+		openButton.Text = "✕"
+	else
+		TweenService:Create(main, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+			Position = UDim2.new(0.5, 0, 0.54, 0),
+		}):Play()
+
+		openButton.Text = "☰"
+
+		task.delay(0.18, function()
+			if not guiOpen then
+				main.Visible = false
+			end
+		end)
+	end
+end
+
+------------------------------------------------------------
+-- CONEXÕES
+------------------------------------------------------------
+
+openButton.MouseButton1Click:Connect(function()
+	setGuiOpen(not guiOpen)
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+	setGuiOpen(false)
+end)
+
+dropdownButton.MouseButton1Click:Connect(function()
+	setDropdownOpen(not dropdownOpen)
+
+	if dropdownOpen then
+		refreshDropdown()
+	end
+end)
+
+toggleButton.MouseButton1Click:Connect(function()
+	setFunctionActive(not functionActive)
+end)
+
+demoButton.MouseButton1Click:Connect(function()
+	if spinActive then
+		notify("Demo", "Aguarde o giro atual terminar.")
+		return
+	end
+
+	local part = workspace:FindFirstChild("SafeSpinPart", true)
+
+	if not part or not part:IsA("BasePart") then
+		notify("Erro", "Crie uma BasePart chamada SafeSpinPart no Workspace.")
+		return
+	end
+
+	spinActive = true
+
+	local originalCFrame = part.CFrame
+	local originalAnchored = part.Anchored
+	part.Anchored = true
+
+	notify("Demo iniciada", "Girando SafeSpinPart por 5 segundos.")
+
+	task.spawn(function()
+		local startTime = os.clock()
+
+		while os.clock() - startTime < 5 and part.Parent do
+			part.CFrame = part.CFrame * CFrame.Angles(
+				math.rad(30),
+				math.rad(45),
+				math.rad(60)
+			)
+
+			RunService.Heartbeat:Wait()
+		end
+
+		if part.Parent then
+			part.CFrame = originalCFrame
+
+			if part:IsA("BasePart") then
+				part.AssemblyLinearVelocity = Vector3.zero
+				part.AssemblyAngularVelocity = Vector3.zero
+			end
+
+			part.Anchored = originalAnchored
+		end
+
+		spinActive = false
+		notify("Demo concluída", "A parte voltou para a posição original.")
+	end)
+end)
+
+------------------------------------------------------------
+-- ATUALIZAÇÃO DE PLAYERS
+------------------------------------------------------------
+
+Players.PlayerAdded:Connect(function()
+	task.wait(0.2)
+	refreshDropdown()
+end)
+
+Players.PlayerRemoving:Connect(function()
+	task.wait(0.2)
+	refreshDropdown()
+end)
+
+-- Atualiza a cada 10 segundos, como você pediu
+task.spawn(function()
+	while gui.Parent do
+		task.wait(10)
+		refreshDropdown()
+	end
+end)
+
+------------------------------------------------------------
+-- ESTADO INICIAL
+------------------------------------------------------------
+
+refreshDropdown()
+updateSelectedLabel()
+updateToggleVisual()
+
+notify("Painel carregado", "Use o botão ☰ para abrir ou fechar.")
