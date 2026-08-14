@@ -1,0 +1,532 @@
+--[[ ==========================================================
+	DEX EXPLORER — Edição Completa (Mobile & PC)
+	Interface inspirada no DEX Explorer original.
+	Cole no executor e execute.
+========================================================== ]]
+
+local Players = game:GetService("Games") and nil or game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local cam = workspace.CurrentCamera
+local VP = (cam and cam.ViewportSize) or Vector2.new(1280, 720)
+local task = task or { wait = wait, spawn = spawn, defer = function(f) spawn(f) end,
+	delay = function(t, f) spawn(function() wait(t) f() end) end, cancel = function() end }
+
+--[[ ---------- UTILITÁRIOS ---------- ]]
+local function new(cls, props, parent)
+	local i = Instance.new(cls)
+	for k, v in pairs(props or {}) do i[k] = v end
+	i.Parent = parent
+	return i
+end
+
+local function hiddenRoot()
+	for _, fn in ipairs({ gethui, get_hidden_gui, gethiddengui }) do
+		if type(fn) == "function" then
+			local ok, r = pcall(fn)
+			if ok and r then return r end
+		end
+	end
+	return Players.LocalPlayer:WaitForChild("PlayerGui")
+end
+
+local function getChildren(obj)
+	if obj.ClassName == "CoreGui" and type(gethui) == "function" then
+		local ok, r = pcall(gethui)
+		if ok and r then
+			local ok2, ch = pcall(function() return r:GetChildren() end)
+			if ok2 and ch then return ch end
+		end
+	end
+	local ok, res = pcall(function() return obj:GetChildren() end)
+	return (ok and res) or {}
+end
+
+--[[ ---------- FORMATAÇÃO / EDIÇÃO DE VALORES ---------- ]]
+local function fmt(v)
+	local t = typeof(v)
+	if t == "string" then return '"' .. v .. '"'
+	elseif t == "boolean" or t == "number" then return tostring(v)
+	elseif t == "EnumItem" then return "Enum." .. v.EnumType.Name .. "." .. v.Name
+	elseif t == "Color3" then return string.format("%d, %d, %d", v.R*255, v.G*255, v.B*255)
+	elseif t == "Vector3" then return string.format("%.1f, %.1f, %.1f", v.X, v.Y, v.Z)
+	elseif t == "Vector2" then return string.format("%.1f, %.1f", v.X, v.Y)
+	elseif t == "UDim2" then return string.format("{%g,%g},{%g,%g}", v.X.Scale, v.X.Offset, v.Y.Scale, v.Y.Offset)
+	elseif t == "BrickColor" then return v.Name
+	elseif t == "Instance" then
+		local ok, s = pcall(function() return v:GetFullName() end)
+		return ok and s or v.Name
+	elseif t == "nil" then return "nil"
+	elseif t == "table" then return "table"
+	elseif t == "function" then return "function"
+	else return t end
+end
+
+local function editText(v)
+	local t = typeof(v)
+	if t == "string" then return v
+	elseif t == "number" then return tostring(v)
+	elseif t == "Color3" then return string.format("%d, %d, %d", v.R*255, v.G*255, v.B*255)
+	elseif t == "Vector3" then return string.format("%.2f, %.2f, %.2f", v.X, v.Y, v.Z)
+	elseif t == "UDim2" then return string.format("{%g, %g}, {%g, %g}", v.X.Scale, v.X.Offset, v.Y.Scale, v.Y.Offset)
+	elseif t == "EnumItem" then return "Enum." .. v.EnumType.Name .. "." .. v.Name
+	elseif t == "BrickColor" then return v.Name
+	else return fmt(v) end
+end
+
+local function parseEdit(text, current)
+	local t = typeof(current)
+	if t == "string" then return text
+	elseif t == "number" then return tonumber(text)
+	elseif t == "Color3" then
+		local r, g, b = text:match("([%d%.]+)%s*,%s*([%d%.]+)%s*,%s*([%d%.]+)")
+		if r then return Color3.fromRGB(tonumber(r), tonumber(g), tonumber(b)) end
+	elseif t == "Vector3" then
+		local x, y, z = text:match("([%-eE%d%.]+)%s*,%s*([%-eE%d%.]+)%s*,%s*([%-eE%d%.]+)")
+		if x then return Vector3.new(tonumber(x), tonumber(y), tonumber(z)) end
+	elseif t == "UDim2" then
+		local a, b, c, d = text:match("{([%-eE%d%.]+)%s*,%s*([%-eE%d%.]+)}%s*,%s*{([%-eE%d%.]+)%s*,%s*([%-eE%d%.]+)}")
+		if a then return UDim2.new(tonumber(a), tonumber(b), tonumber(c), tonumber(d)) end
+	elseif t == "EnumItem" then
+		local et, ei = text:match("^Enum%.(%w+)%.(%w+)$")
+		if et then
+			local ok, res = pcall(function() return Enum[et][ei] end)
+			if ok then return res end
+		end
+	elseif t == "BrickColor" then
+		local ok, res = pcall(function() return BrickColor.new(text) end)
+		if ok then return res end
+	end
+	return nil
+end
+
+local EDITABLE = { string = true, number = true, Color3 = true, Vector3 = true, UDim2 = true, EnumItem = true, BrickColor = true }
+local function canEdit(v) return EDITABLE[typeof(v)] == true end
+
+--[[ ---------- ÍCONES POR CLASSE (estilo DEX) ---------- ]]
+local NAMED_ICONS = {
+	Workspace = "🌐", Players = "👥", Lighting = "💡", SoundService = "🔊",
+	CoreGui = "🖥️", StarterGui = "🖥️", StarterPlayer = "🧍", StarterPack = "🎒",
+	ReplicatedFirst = "📦", ReplicatedStorage = "📦", ServerStorage = "🗄️",
+	ServerScriptService = "🖥️", NetworkClient = "📡", NetworkServer = "📡",
+	MaterialService = "🎨", Chat = "💬", Terrain = "⛰️",
+	CorePackages = "◇", PlatformLibraries = "◇",
+}
+local function iconFor(obj)
+	local ic = NAMED_ICONS[obj.ClassName]
+	if ic then return ic end
+	if obj:IsA("Model") then return "🧍" end
+	if obj:IsA("BasePart") then return "🧱" end
+	if obj:IsA("BaseScript") then return "📜" end
+	if obj:IsA("Folder") then return "📁" end
+	if obj:IsA("LayerCollector") or obj:IsA("GuiObject") then return "🖥️" end
+	if obj:IsA("Tool") then return "🔧" end
+	if obj:IsA("Humanoid") then return "🧍" end
+	if obj:IsA("Camera") then return "📷" end
+	if obj:IsA("Light") then return "💡" end
+	if obj:IsA("Sound") then return "🔔" end
+	if obj:IsA("Constraint") then return "🔗" end
+	if obj:IsA("Decal") or obj:IsA("Texture") then return "🖼️" end
+	if obj:IsA("ValueBase") then return "💾" end
+	if obj:IsA("ParticleEmitter") or obj:IsA("Beam") then return "✨" end
+	if obj:IsA("Animation") then return "🎞️" end
+	return "◇"
+end
+
+--[[ ---------- GUI BASE ---------- ]]
+local THEME = {
+	panel = Color3.fromRGB(30, 30, 30), header = Color3.fromRGB(45, 45, 45),
+	search = Color3.fromRGB(62, 62, 62), text = Color3.fromRGB(255, 255, 255),
+	dim = Color3.fromRGB(160, 160, 160), sel = Color3.fromRGB(75, 75, 75),
+}
+
+local gui = new("ScreenGui", {
+	Name = "DexExplorer", ResetOnSpawn = false,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	DisplayOrder = 999, IgnoreGuiInset = true,
+})
+if not pcall(function() gui.Parent = hiddenRoot() end) then
+	gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+end
+
+local expanded, selected, rowRefs = {}, nil, {}
+expanded[game] = true
+local maximized = false
+local function panelW() return maximized and (VP.X - 16) or math.min(360, VP.X - 16) end
+
+-- declarações adiantadas
+local renderTree, renderProps, selectInstance, showMenu, bindLongPress
+
+local panels = new("Frame", { Name = "Panels", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 1, 0), Parent = gui })
+
+--[[ ---------- PAINEL EXPLORER ---------- ]]
+local explorer = new("Frame", {
+	BackgroundColor3 = THEME.panel, BackgroundTransparency = 0.12, BorderSizePixel = 0,
+	Position = UDim2.new(0, 8, 0, 8),
+	Size = UDim2.new(0, panelW(), 0, math.floor(VP.Y * 0.58)),
+	ClipsDescendants = true, Parent = panels,
+})
+local exHeader = new("Frame", { Size = UDim2.new(1, 0, 0, 38), BackgroundColor3 = THEME.header, BorderSizePixel = 0, Parent = explorer })
+new("TextLabel", { Size = UDim2.new(1, -90, 1, 0), Position = UDim2.new(0, 10, 0, 0), BackgroundTransparency = 1,
+	Text = "Explorer", TextColor3 = THEME.text, TextSize = 17, Font = Enum.Font.SourceSansSemibold,
+	TextXAlignment = Enum.TextXAlignment.Left, Parent = exHeader })
+local btnMax = new("TextButton", { Size = UDim2.new(0, 30, 0, 30), Position = UDim2.new(1, -64, 0, 4), BackgroundTransparency = 1,
+	Text = "⧉", TextColor3 = THEME.dim, TextSize = 18, Parent = exHeader })
+local btnClose = new("TextButton", { Size = UDim2.new(0, 30, 0, 30), Position = UDim2.new(1, -32, 0, 4), BackgroundTransparency = 1,
+	Text = "✕", TextColor3 = THEME.dim, TextSize = 18, Parent = exHeader })
+
+local exSearch = new("Frame", { Size = UDim2.new(1, -16, 0, 32), Position = UDim2.new(0, 8, 0, 44),
+	BackgroundColor3 = THEME.search, BorderSizePixel = 0, Parent = explorer })
+local exSearchBox = new("TextBox", { Size = UDim2.new(1, -36, 1, 0), Position = UDim2.new(0, 10, 0, 0), BackgroundTransparency = 1,
+	PlaceholderText = "Search workspace", Text = "", TextColor3 = THEME.text, PlaceholderColor3 = THEME.dim,
+	TextSize = 15, Font = Enum.Font.SourceSans, TextXAlignment = Enum.TextXAlignment.Left, ClearTextOnFocus = false, Parent = exSearch })
+new("TextLabel", { Size = UDim2.new(0, 24, 1, 0), Position = UDim2.new(1, -28, 0, 0), BackgroundTransparency = 1, Text = "🔍", TextSize = 15, Parent = exSearch })
+
+local treeScroll = new("ScrollingFrame", { Size = UDim2.new(1, -16, 1, -86), Position = UDim2.new(0, 8, 0, 82),
+	BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 4,
+	ScrollBarImageColor3 = THEME.dim, AutomaticCanvasSize = Enum.AutomaticSize.Y, Parent = explorer })
+new("UIListLayout", { Padding = UDim.new(0, 0), Parent = treeScroll })
+
+local btnUp = new("TextButton", { Size = UDim2.new(0, 14, 0, 12), Position = UDim2.new(1, -14, 0, 82),
+	BackgroundTransparency = 1, Text = "▲", TextSize = 9, TextColor3 = THEME.dim, Parent = explorer })
+local btnDown = new("TextButton", { Size = UDim2.new(0, 14, 0, 12), Position = UDim2.new(1, -14, 1, -14),
+	BackgroundTransparency = 1, Text = "▼", TextSize = 9, TextColor3 = THEME.dim, Parent = explorer })
+btnUp.MouseButton1Click:Connect(function() treeScroll.CanvasPosition = treeScroll.CanvasPosition - Vector2.new(0, 80) end)
+btnDown.MouseButton1Click:Connect(function() treeScroll.CanvasPosition = treeScroll.CanvasPosition + Vector2.new(0, 80) end)
+
+new("TextLabel", { Size = UDim2.new(0, 60, 0, 24), Position = UDim2.new(1, -66, 1, -28), BackgroundTransparency = 1,
+	Text = "DEX", TextColor3 = Color3.fromRGB(120, 120, 120), TextTransparency = 0.35, TextSize = 18,
+	Font = Enum.Font.SourceSansBold, TextXAlignment = Enum.TextXAlignment.Right, Parent = explorer })
+
+--[[ ---------- PAINEL PROPERTIES ---------- ]]
+local propsPanel = new("Frame", {
+	BackgroundColor3 = THEME.panel, BackgroundTransparency = 0.12, BorderSizePixel = 0,
+	Position = UDim2.new(0, 8, 0, 14 + math.floor(VP.Y * 0.58)),
+	Size = UDim2.new(0, panelW(), 0, math.floor(VP.Y * 0.30)),
+	ClipsDescendants = true, Parent = panels,
+})
+local prHeader = new("Frame", { Size = UDim2.new(1, 0, 0, 38), BackgroundColor3 = THEME.header, BorderSizePixel = 0, Parent = propsPanel })
+new("TextLabel", { Size = UDim2.new(1, -70, 1, 0), Position = UDim2.new(0, 10, 0, 0), BackgroundTransparency = 1,
+	Text = "Properties", TextColor3 = THEME.text, TextSize = 17, Font = Enum.Font.SourceSansSemibold,
+	TextXAlignment = Enum.TextXAlignment.Left, Parent = prHeader })
+local btnRefresh = new("TextButton", { Size = UDim2.new(0, 30, 0, 30), Position = UDim2.new(1, -32, 0, 4), BackgroundTransparency = 1,
+	Text = "🔄", TextSize = 15, Parent = prHeader })
+
+local prSearch = new("Frame", { Size = UDim2.new(1, -16, 0, 32), Position = UDim2.new(0, 8, 0, 44),
+	BackgroundColor3 = THEME.search, BorderSizePixel = 0, Parent = propsPanel })
+local propSearchBox = new("TextBox", { Size = UDim2.new(1, -36, 1, 0), Position = UDim2.new(0, 10, 0, 0), BackgroundTransparency = 1,
+	PlaceholderText = "Search properties", Text = "", TextColor3 = THEME.text, PlaceholderColor3 = THEME.dim,
+	TextSize = 15, Font = Enum.Font.SourceSans, TextXAlignment = Enum.TextXAlignment.Left, ClearTextOnFocus = false, Parent = prSearch })
+new("TextLabel", { Size = UDim2.new(0, 24, 1, 0), Position = UDim2.new(1, -28, 0, 0), BackgroundTransparency = 1, Text = "🔍", TextSize = 15, Parent = prSearch })
+
+local propsScroll = new("ScrollingFrame", { Size = UDim2.new(1, -16, 1, -86), Position = UDim2.new(0, 8, 0, 82),
+	BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 4,
+	ScrollBarImageColor3 = THEME.dim, AutomaticCanvasSize = Enum.AutomaticSize.Y, Parent = propsPanel })
+new("UIListLayout", { Padding = UDim.new(0, 0), Parent = propsScroll })
+
+--[[ ---------- BOTÃO ">" TOPO / CAIXA DE EDIÇÃO / MENU ---------- ]]
+local toggleBtn = new("TextButton", { Size = UDim2.new(0, 36, 0, 36), Position = UDim2.new(1, -44, 0, 8),
+	BackgroundColor3 = THEME.header, BorderSizePixel = 0, Text = ">", TextColor3 = THEME.text,
+	TextSize = 20, Font = Enum.Font.SourceSansBold, Parent = gui })
+local function setPanelsVisible(v) panels.Visible = v; toggleBtn.Text = v and ">" or "<" end
+toggleBtn.MouseButton1Click:Connect(function() setPanelsVisible(not panels.Visible) end)
+btnClose.MouseButton1Click:Connect(function() setPanelsVisible(false) end)
+btnMax.MouseButton1Click:Connect(function()
+	maximized = not maximized
+	explorer.Size = UDim2.new(0, panelW(), 0, explorer.Size.Y.Offset)
+	propsPanel.Size = UDim2.new(0, panelW(), 0, propsPanel.Size.Y.Offset)
+end)
+
+local editBox = new("TextBox", { Visible = false, BackgroundColor3 = Color3.fromRGB(20, 20, 20), BorderSizePixel = 0,
+	TextColor3 = THEME.text, TextSize = 14, PlaceholderText = "valor…", ClearTextOnFocus = false, ZIndex = 50, Parent = gui })
+local editTarget = nil
+editBox.FocusLost:Connect(function(enter)
+	if editTarget and enter then
+		local obj, prop = editTarget.obj, editTarget.prop
+		local ok, cur = pcall(function() return obj[prop] end)
+		if ok then
+			local parsed = parseEdit(editBox.Text, cur)
+			if parsed ~= nil then pcall(function() obj[prop] = parsed end) end
+		end
+	end
+	editTarget = nil
+	editBox.Visible = false
+	renderProps()
+end)
+
+local menuCatcher = new("TextButton", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", Visible = false, ZIndex = 55, Parent = gui })
+local menu = new("Frame", { Visible = false, BackgroundColor3 = Color3.fromRGB(24, 24, 24), BorderSizePixel = 0,
+	Size = UDim2.fromOffset(172, 0), AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 60, Parent = gui })
+new("UIListLayout", { Padding = UDim.new(0, 2), Parent = menu })
+local function hideMenu() menu.Visible = false; menuCatcher.Visible = false end
+menuCatcher.MouseButton1Click:Connect(hideMenu)
+
+showMenu = function(obj, pos)
+	for _, c in ipairs(menu:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
+	local function item(label, cb)
+		local b = new("TextButton", { Size = UDim2.new(1, -12, 0, 28), BackgroundTransparency = 1,
+			Text = "  " .. label, TextColor3 = THEME.text, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = menu })
+		b.MouseButton1Click:Connect(function() hideMenu() cb() end)
+	end
+	item("📋 Copiar caminho", function()
+		local ok, full = pcall(function() return obj:GetFullName() end)
+		if ok and type(setclipboard) == "function" then setclipboard(full) end
+	end)
+	item("🧍 Selecionar", function() selectInstance(obj) end)
+	item("💥 Destroy", function() pcall(function() obj:Destroy() end) end)
+	item("🚫 Parent = nil", function() pcall(function() obj.Parent = nil end) end)
+	item("✕ Fechar", function() end)
+	menu.Position = UDim2.fromOffset(math.min(pos.X, VP.X - 180), math.min(pos.Y, VP.Y - 170))
+	menu.Visible = true; menuCatcher.Visible = true
+end
+
+bindLongPress = function(btn, cb)
+	local thread
+	btn.InputBegan:Connect(function(inp)
+		if inp.UserInputType == Enum.UserInputType.Touch then
+			thread = task.delay(0.55, function() cb(btn.AbsolutePosition + Vector2.new(40, 24)) end)
+		end
+	end)
+	btn.InputEnded:Connect(function(inp)
+		if inp.UserInputType == Enum.UserInputType.Touch and thread then task.cancel(thread) thread = nil end
+	end)
+end
+
+--[[ ---------- ÁRVORE (EXPLORER) ---------- ]]
+local ROW_H = 28
+local function clearList(scroll)
+	for _, c in ipairs(scroll:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
+end
+
+local function makeRow(obj, depth)
+	local hasKids = #getChildren(obj) > 0
+	local row = new("TextButton", { Size = UDim2.new(1, 0, 0, ROW_H), AutoButtonColor = false,
+		BackgroundColor3 = THEME.sel, BackgroundTransparency = 1, BorderSizePixel = 0, ClipsDescendants = true, Text = "" })
+	rowRefs[obj] = row
+	local pad = depth * 14
+
+	if hasKids then
+		local arrow = new("TextButton", { Size = UDim2.new(0, 16, 1, 0), Position = UDim2.new(0, pad + 2, 0, 0),
+			BackgroundTransparency = 1, Text = "▶", TextSize = 10, TextColor3 = THEME.dim,
+			Rotation = expanded[obj] and 90 or 0, Parent = row })
+		arrow.MouseButton1Click:Connect(function() expanded[obj] = not expanded[obj]; renderTree() end)
+	end
+
+	new("TextLabel", { Size = UDim2.new(0, 22, 1, 0), Position = UDim2.new(0, pad + 20, 0, 0),
+		BackgroundTransparency = 1, Text = iconFor(obj), TextSize = 14, Parent = row })
+	new("TextLabel", { Size = UDim2.new(1, -(pad + 46), 1, 0), Position = UDim2.new(0, pad + 44, 0, 0),
+		BackgroundTransparency = 1, Text = obj.Name, TextColor3 = THEME.text, TextSize = 15,
+		Font = Enum.Font.SourceSans, TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd, Parent = row })
+
+	row.MouseButton1Click:Connect(function() selectInstance(obj) end)
+	row.MouseButton2Click:Connect(function() showMenu(obj, row.AbsolutePosition + Vector2.new(30, ROW_H)) end)
+	bindLongPress(row, function(pos) showMenu(obj, pos) end)
+	row.MouseEnter:Connect(function() if selected ~= obj then row.BackgroundTransparency = 0.5 end end)
+	row.MouseLeave:Connect(function() if selected ~= obj then row.BackgroundTransparency = 1 end end)
+	return row
+end
+
+renderTree = function()
+	local keep = treeScroll.CanvasPosition.Y
+	clearList(treeScroll)
+	rowRefs = {}
+	local count = 0
+	local function add(o, d)
+		count = count + 1
+		if count > 1200 then return end
+		local row = makeRow(o, d)
+		row.Parent = treeScroll
+		if expanded[o] then
+			for _, ch in ipairs(getChildren(o)) do add(ch, d + 1) end
+		end
+	end
+	for _, svc in ipairs(getChildren(game)) do add(svc, 0) end
+	treeScroll.CanvasPosition = Vector2.new(0, keep)
+	if selected and rowRefs[selected] then rowRefs[selected].BackgroundTransparency = 0 end
+end
+
+local function renderSearch(q)
+	clearList(treeScroll)
+	rowRefs = {}
+	q = q:lower()
+	local found, iter = 0, 0
+	local function walk(o)
+		for _, ch in ipairs(getChildren(o)) do
+			iter = iter + 1
+			if iter % 400 == 0 then task.wait() end
+			if found >= 150 then return end
+			if ch.Name:lower():find(q, 1, true) then
+				found = found + 1
+				local row = makeRow(ch, 0)
+				row.Parent = treeScroll
+				row.MouseButton1Click:Connect(function()
+					local p = ch.Parent
+					while p do expanded[p] = true p = p.Parent end
+					exSearchBox.Text = ""
+					selectInstance(ch)
+				end)
+			end
+			walk(ch)
+		end
+	end
+	walk(game)
+	if found == 0 then
+		new("TextLabel", { Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1,
+			Text = "  (nenhum resultado)", TextColor3 = THEME.dim, TextSize = 14,
+			TextXAlignment = Enum.TextXAlignment.Left, Parent = treeScroll })
+	end
+end
+
+selectInstance = function(obj)
+	selected = obj
+	for o, row in pairs(rowRefs) do row.BackgroundTransparency = (o == obj) and 0 or 1 end
+	renderProps()
+end
+
+--[[ ---------- PROPERTIES ---------- ]]
+local COMMON_PROPS = { "Name","ClassName","Parent","Archivable","Position","Size","Rotation","CFrame","Anchored",
+	"CanCollide","CanTouch","CanQuery","CastShadow","Massless","Material","Color","Color3","BrickColor","Transparency",
+	"BackgroundTransparency","BackgroundColor3","TextColor3","Text","TextSize","Font","Visible","Enabled","Locked","Value",
+	"Volume","Looped","Playing","TimePosition","Brightness","Shadows","ClockTime","GeographicLatitude","GlobalShadows",
+	"OutdoorAmbient","FogEnd","FogStart","WalkSpeed","JumpPower","Health","MaxHealth","DisplayName","UserId","AccountAge",
+	"AutoJumpEnabled","ZIndex","BorderSizePixel","BorderColor3","ClipsDescendants","AutoButtonColor","Modal","Active",
+	"Source","Disabled","RunContext","PrimaryPart","Style","Shape","TopSurface","BottomSurface","Reflectance",
+	"Attachment0","Attachment1","Adornee","Face","Offset","Magnitude","Direction","FieldOfView","CameraType","HipHeight",
+	"MaxSlopeAngle","Speed","MinValue","MaxValue","Increment","Draggable","Selectable","Selected" }
+
+local function getPropertyNames(obj)
+	if type(getproperties) == "function" then
+		local ok, res = pcall(getproperties, obj)
+		if ok and type(res) == "table" then
+			local names = {}
+			for k, v in pairs(res) do
+				if type(k) == "string" then names[#names + 1] = k
+				elseif type(k) == "number" then names[#names + 1] = tostring(v) end
+			end
+			if type(gethiddenproperties) == "function" then
+				local ok2, h = pcall(gethiddenproperties, obj)
+				if ok2 and type(h) == "table" then
+					for k in pairs(h) do if type(k) == "string" then names[#names + 1] = k end end
+				end
+			end
+			if #names > 0 then return names end
+		end
+	end
+	local names = {}
+	for _, p in ipairs(COMMON_PROPS) do
+		if pcall(function() return obj[p] end) then names[#names + 1] = p end
+	end
+	return names
+end
+
+local function makePropRow(obj, pname)
+	local row = new("Frame", { Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1, Parent = propsScroll })
+	new("TextLabel", { Size = UDim2.new(0.42, -6, 1, 0), Position = UDim2.new(0, 6, 0, 0), BackgroundTransparency = 1,
+		Text = pname, TextColor3 = THEME.text, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd, Parent = row })
+	local valBtn = new("TextButton", { Size = UDim2.new(0.58, -8, 1, 0), Position = UDim2.new(0.42, 2, 0, 0),
+		AutoButtonColor = false, BackgroundTransparency = 1, TextSize = 13, TextColor3 = THEME.dim,
+		TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, Parent = row })
+	local ok, cur = pcall(function() return obj[pname] end)
+	if not ok then valBtn.Text = "🔒" return end
+	valBtn.Text = fmt(cur)
+	valBtn.MouseButton1Click:Connect(function()
+		local ok2, now = pcall(function() return obj[pname] end)
+		if not ok2 then return end
+		if typeof(now) == "boolean" then
+			pcall(function() obj[pname] = not now end)
+			renderProps()
+		elseif canEdit(now) then
+			editTarget = { obj = obj, prop = pname }
+			editBox.Size = UDim2.fromOffset(math.max(150, valBtn.AbsoluteSize.X), 22)
+			editBox.Position = UDim2.fromOffset(valBtn.AbsolutePosition.X, valBtn.AbsolutePosition.Y)
+			editBox.Text = editText(now)
+			editBox.Visible = true
+			task.defer(function() editBox:CaptureFocus() end)
+		end
+	end)
+end
+
+renderProps = function()
+	clearList(propsScroll)
+	if not selected then return end
+	local obj = selected
+	local head = new("Frame", { Size = UDim2.new(1, 0, 0, 32), BackgroundColor3 = THEME.header, BorderSizePixel = 0, Parent = propsScroll })
+	new("TextLabel", { Size = UDim2.new(0, 26, 1, 0), Position = UDim2.new(0, 6, 0, 0), BackgroundTransparency = 1,
+		Text = iconFor(obj), TextSize = 15, Parent = head })
+	new("TextLabel", { Size = UDim2.new(1, -40, 1, 0), Position = UDim2.new(0, 34, 0, 0), BackgroundTransparency = 1,
+		Text = obj.ClassName .. ' "' .. obj.Name .. '"', TextColor3 = THEME.text, TextSize = 14,
+		Font = Enum.Font.SourceSansSemibold, TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd, Parent = head })
+	local filter = propSearchBox.Text:lower()
+	local names = getPropertyNames(obj)
+	table.sort(names)
+	for _, pname in ipairs(names) do
+		if filter == "" or pname:lower():find(filter, 1, true) then makePropRow(obj, pname) end
+	end
+end
+
+btnRefresh.MouseButton1Click:Connect(renderProps)
+
+--[[ ---------- BUSCAS (debounce) ---------- ]]
+local pSearch, pProps = false, false
+exSearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+	if pSearch then return end
+	pSearch = true
+	task.delay(0.25, function()
+		pSearch = false
+		if exSearchBox.Text == "" then renderTree() else renderSearch(exSearchBox.Text) end
+	end)
+end)
+propSearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+	if pProps then return end
+	pProps = true
+	task.delay(0.2, function() pProps = false; renderProps() end)
+end)
+
+--[[ ---------- ATUALIZAÇÃO AUTOMÁTICA DA HIERARQUIA ---------- ]]
+local updPending = false
+local function scheduleUpdate()
+	if updPending then return end
+	updPending = true
+	task.delay(0.5, function()
+		updPending = false
+		if selected and not pcall(function() return selected.Parent end) then selected = nil end
+		if exSearchBox.Text == "" then renderTree() end
+	end)
+end
+local function onChange(d)
+	local p = d.Parent
+	while p do
+		if expanded[p] then scheduleUpdate() return end
+		p = p.Parent
+	end
+end
+game.DescendantAdded:Connect(onChange)
+game.DescendantRemoving:Connect(onChange)
+
+--[[ ---------- ARRASTAR PAINÉIS ---------- ]]
+local function makeDraggable(frame, handle)
+	local dragging, startP, startPos
+	handle.InputBegan:Connect(function(inp)
+		if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+			dragging = true; startP = inp.Position; startPos = frame.Position
+		end
+	end)
+	handle.InputEnded:Connect(function(inp)
+		if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then dragging = false end
+	end)
+	UIS.InputChanged:Connect(function(inp)
+		if dragging and (inp.UserInputType == Enum.UserInputType.MouseMove or inp.UserInputType == Enum.UserInputType.Touch) then
+			local d = inp.Position - startP
+			frame.Position = startPos + UDim2.new(0, d.X, 0, d.Y)
+		end
+	end)
+end
+makeDraggable(explorer, exHeader)
+makeDraggable(propsPanel, prHeader)
+
+--[[ ---------- INÍCIO ---------- ]]
+renderTree()
+renderProps()
+print("✅ DEX Explorer carregado com sucesso!")
